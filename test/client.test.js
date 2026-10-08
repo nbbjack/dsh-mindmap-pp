@@ -3140,6 +3140,70 @@ test('033 MindmapCanvas focus click applies zoom instantly without rAF and caps 
   assert.ok(zoomRefFound, 'zoomRef lands at 0.25 after two clicks (1 → 0.5 → 0.25, ÷2 per click)')
 })
 
+// —— 040 缩放条「100%」按钮：点节点本来就会落到 100%，这里补一个显式入口 ——
+
+// 用 effect driver 挂载画布并重渲染：缩放条上的 disabled / 当前比例都随
+// zoom state 变化，必须走有状态渲染才能观察到「离开 100% → 可点」。
+function renderCanvasDriven(harness, props, mounting = false) {
+  const { driver, MindmapCanvas, rafQueue } = harness
+  driver.beginRender()
+  MindmapCanvas(props)
+  if (mounting) driver.flushMount()
+  else driver.flushUpdate()
+  // 排空 mount/update 期的 rAF（fit 路径）：无 fake DOM 时 applyFit 无害早退，
+  // 但留着会在后续断言间乱跑。
+  for (const fn of rafQueue.splice(0)) if (fn) fn()
+  driver.beginRender()
+  const rendered = MindmapCanvas(props)
+  driver.flushUpdate()
+  for (const fn of rafQueue.splice(0)) if (fn) fn()
+  return rendered
+}
+
+test('040 zoom bar places a 100% button before 适配', () => {
+  capturedRefs.length = 0
+  const canvas = MindmapCanvas({
+    node: parseMarkdownToTree('# A\n## B', 'doc'), theme: null, fitKey: '040.md', reveal: null,
+  })
+  const bar = findInTree(canvas, (el) => el.props && el.props.style === S.zoomBar)
+  assert.ok(bar, '缩放条存在')
+  const seq = bar.props.children.filter(Boolean).map((c) => {
+    if (!c || !c.props) return null
+    if (c.props.title) return c.props.title
+    return typeof c.props.children === 'string' ? c.props.children : null
+  })
+  // 「100%」按钮排在只读的当前比例标签与「放大」之后、「适配」之前。
+  // 用 join 比较：children 数组来自 vm realm，deepStrictEqual 会因原型不同误报。
+  assert.equal(seq.join(' | '), [
+    '搜索节点（⌘/Ctrl+F）', '缩小', '100%', '放大', '缩放至 100%', '适配画布（重新计算合适比例）',
+  ].join(' | '), '缩放条顺序：搜索 · 缩小 · 当前比例 · 放大 · 100% · 适配')
+  const btn = findInTree(canvas, (el) => el.props && el.props.title === '缩放至 100%')
+  assert.equal(btn.props.children, '100%', '按钮文案就是 100%')
+  assert.equal(btn.props.disabled, true, '起始比例即为 100%，按钮置灰')
+})
+
+test('040 the 100% button is enabled off 100% and snaps the zoom back exactly', () => {
+  const harness = loadClientWithEffectDriver()
+  const props = { node: parseMarkdownToTree('# A\n## B', 'doc'), theme: null, fitKey: '040.md', reveal: null }
+  const btnOf = (rendered) => findInTree(rendered, (el) => el.props && el.props.title === '缩放至 100%')
+  try {
+    let rendered = renderCanvasDriven(harness, props, true)
+    assert.equal(btnOf(rendered).props.disabled, true, '在 100% 时置灰')
+
+    // 缩小一级（×1/1.2 ≈ 83%）→ 按钮恢复可点。
+    findInTree(rendered, (el) => el.props && el.props.title === '缩小').props.onClick()
+    rendered = renderCanvasDriven(harness, props)
+    assert.equal(btnOf(rendered).props.disabled, false, '离开 100% 后应可点')
+
+    // 点它 → 精确回到 100%，按钮重新置灰。
+    btnOf(rendered).props.onClick()
+    rendered = renderCanvasDriven(harness, props)
+    assert.equal(btnOf(rendered).props.disabled, true, '点击后精确回到 100% 并再次置灰')
+  } finally {
+    harness.driver.unmount()
+  }
+})
+
 // —— 034 聚焦动画跳闪修复：首帧零跳变 + 锚位插值 + DOM 直写 + 结束同步 ——
 
 test('034 focus animation: no first-frame jump, interpolated anchor, DOM-direct zoom, final sync', () => {

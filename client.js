@@ -2991,6 +2991,15 @@ window.__ModuleLoader__.load({
 					setZoom(stepZoom(zoomRef.current, -1), true);
 				}
 
+				// 040 一键回到 100%：点节点聚焦本来就会落到 100%，但缩放条上也该有
+				// 一个显式入口。语义与 −/+ 一致——视为用户手动缩放（停自动再适配）、
+				// 保持视口中心，动画在飞时先截停。
+				function zoomTo100() {
+					userZoomedRef.current = true;
+					cancelZoomAnim();
+					setZoom(1, true);
+				}
+
 				function refit() {
 					userZoomedRef.current = false;
 					fitStampRef.current = [];
@@ -3292,6 +3301,9 @@ window.__ModuleLoader__.load({
 				// 边界反馈：到达上下限时对应按钮置灰（fit 值与边界精确相等时也命中）。
 				const atMin = zoom <= ZOOM.min;
 				const atMax = zoom >= ZOOM.max;
+				// 040 已处于 100% 时把「100%」按钮置灰，和 −/+ 的边界反馈同语义。
+				// 浮点比较留容差：步进缩放（×1.2 逐级）落不回精确的 1。
+				const atOne = Math.abs(zoom - 1) < 1e-3;
 				const zoomBtnStyle = (key, disabled) => (disabled
 					? { ...S.zoomBtn, ...S.zoomBtnDisabled }
 					: (hover === key ? { ...S.zoomBtn, ...S.zoomBtnHover } : S.zoomBtn));
@@ -3390,6 +3402,20 @@ window.__ModuleLoader__.load({
 							onMouseEnter: () => setHover("in"),
 							onMouseLeave: () => setHover((h) => (h === "in" ? null : h)),
 							children: "+",
+						}),
+						// 040 一键 100%：插在「适配」之前。左侧的 zoomLabel 是只读的
+						// 当前比例，这里是可点按钮，两者样式刻意区分（文字标签 vs 按钮）。
+						(0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							title: "缩放至 100%",
+							style: atOne
+								? { ...S.zoomFitBtn, ...S.zoomBtnDisabled }
+								: (hover === "one" ? { ...S.zoomFitBtn, ...S.zoomBtnHover } : S.zoomFitBtn),
+							disabled: atOne,
+							onClick: zoomTo100,
+							onMouseEnter: () => setHover("one"),
+							onMouseLeave: () => setHover((h) => (h === "one" ? null : h)),
+							children: "100%",
 						}),
 						(0, react_jsx_runtime.jsx)("button", {
 							type: "button",
