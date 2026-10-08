@@ -29,6 +29,20 @@
 		title: "把当前脑图的 Markdown 原文复制到剪贴板",
 		children: copying ? "复制中…" : copiedOk ? "已复制 ✓" : "复制全文",
 	});
+	// 039 方向切换按钮（两种模式共用）：显示当前生长方向，点击切到另一个——
+	// 看脑图时随手换向，不必绕到「设置 → 插件 → dsh-mindmap」。disabled 语义
+	// 与导出/复制一致（无树 / 切换中 / 本地占位），并在 title 里写明点下去的结果。
+	const verticalLayout = normalizeLayoutDirection(theme && theme.layoutDirection) === "vertical";
+	const directionBtn = (0, react_jsx_runtime.jsx)("button", {
+		type: "button",
+		style: S.action,
+		disabled: !tree || directionSaving || (doc && doc.op === "local"),
+		onClick: onToggleDirection,
+		title: verticalLayout
+			? "当前：纵向（根节点在顶部，逐层向下）— 点击切换为横向"
+			: "当前：横向（根节点在左侧，逐层向右）— 点击切换为纵向",
+		children: directionSaving ? "切换中…" : verticalLayout ? "⇣ 纵向" : "⇢ 横向",
+	});
 	const exportErrorSpan = exportError
 		? (0, react_jsx_runtime.jsx)("span", { style: { color: "var(--dsw-alias-label-error)", fontSize: "12px" }, children: exportError })
 		: null;
@@ -103,6 +117,7 @@
 				(0, react_jsx_runtime.jsx)("span", { style: S.spacer }),
 				approvalControls,
 				exportErrorSpan,
+				directionBtn,
 				copyBtn,
 				exportBtn,
 			] }),
@@ -139,6 +154,7 @@
 		(0, react_jsx_runtime.jsxs)("div", { style: S.headerTop, children: [
 			(0, react_jsx_runtime.jsx)("span", { style: S.spacer }),
 			approvalControls,
+			directionBtn,
 			copyBtn,
 			exportBtn,
 			exportErrorSpan,

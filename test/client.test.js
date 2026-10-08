@@ -1116,6 +1116,82 @@ test('039 vertical export still renders any subtree as its own rooted export', (
   assert.ok(!leaf.svg.includes('<path'))
 })
 
+// 039 工具栏方向按钮：看脑图时一键换向，不必绕到「设置 → 插件 → dsh-mindmap」。
+
+test('039 toolbar direction button is present in both variants and left of 复制全文', () => {
+  for (const variant of ['sidebar', 'standalone']) {
+    const rendered = renderWorkspace(variant)
+    const texts = collectTexts(rendered)
+    assert.ok(texts.includes('⇢ 横向'), `${variant}: 初始显示当前方向（横向）`)
+    assert.ok(texts.indexOf('⇢ 横向') < texts.indexOf('复制全文'), `${variant}: 方向按钮排在复制全文左侧`)
+    assert.ok(texts.indexOf('复制全文') < texts.indexOf('导出图片'), `${variant}: 复制仍在导出左侧`)
+    const btn = findInTree(rendered, (el) => el.props && typeof el.props.title === 'string' && el.props.title.includes('点击切换为纵向'))
+    assert.ok(btn, `${variant}: 方向按钮已渲染且 title 写明点下去的后果`)
+  }
+})
+
+test('039 direction button flips and persists the layout, and the label follows the saved value', async () => {
+  const harness = loadClientWithEffectDriver()
+  const writes = []
+  // 有状态 mock：updateSettings 回写后 readSettings 返回新值，等价于真实往返。
+  let stored = { layoutDirection: 'horizontal', lineStyle: 'elbow' }
+  const props = {
+    variant: 'standalone', visible: true, sessionId: 'dir-toggle', onAutoOpen() {},
+    mindmapFace: {
+      readSettings: async () => ({ ...stored }),
+      updateSettings: async (patch) => { writes.push(patch); Object.assign(stored, patch) },
+    },
+    nodes: [toolResultNode('mindmap_open', { ok: true, op: 'open', path: '/w/test.md', content: '# A\n- x', rootTitle: '测试脑图' }, { callId: 'dir-open' })],
+  }
+  try {
+    const rendered = renderWorkspaceAfterEffects(harness, props, true)
+    const btn = findInTree(rendered, (el) => el.props && typeof el.props.title === 'string' && el.props.title.includes('点击切换为纵向'))
+    assert.ok(btn, '方向按钮已渲染')
+    assert.equal(btn.props.disabled, false, '有已打开的文档时应可用')
+
+    await btn.props.onClick()
+    // 逐字段断言：patch 对象在 vm realm 里创建，deepStrictEqual 会比较原型而误报。
+    assert.equal(writes.length, 1, '只写入一次')
+    assert.equal(writes[0].layoutDirection, 'vertical', '持久化为纵向')
+
+    // 重渲染后：按钮反映已保存的值，title 也变成「点击切换为横向」。
+    const after = renderWorkspaceAfterEffects(harness, props)
+    assert.ok(collectTexts(after).includes('⇣ 纵向'), '按钮跟随已保存的纵向')
+    const btn2 = findInTree(after, (el) => el.props && typeof el.props.title === 'string' && el.props.title.includes('点击切换为横向'))
+    assert.ok(btn2, 'title 反映纵向态')
+
+    // 再点一次切回横向。
+    await btn2.props.onClick()
+    assert.equal(writes.length, 2, '共写入两次')
+    assert.equal(writes[1].layoutDirection, 'horizontal', '再次点击切回横向')
+  } finally {
+    harness.driver.unmount()
+  }
+})
+
+test('039 direction button surfaces a failed save instead of pretending it worked', async () => {
+  const harness = loadClientWithEffectDriver()
+  const props = {
+    variant: 'standalone', visible: true, sessionId: 'dir-fail', onAutoOpen() {},
+    mindmapFace: {
+      readSettings: async () => ({ layoutDirection: 'horizontal', lineStyle: 'elbow' }),
+      updateSettings: async () => { throw new Error('设置写入被拒绝') },
+    },
+    nodes: [toolResultNode('mindmap_open', { ok: true, op: 'open', path: '/w/test.md', content: '# A\n- x', rootTitle: '测试脑图' }, { callId: 'dir-fail-open' })],
+  }
+  try {
+    const rendered = renderWorkspaceAfterEffects(harness, props, true)
+    const btn = findInTree(rendered, (el) => el.props && typeof el.props.title === 'string' && el.props.title.includes('点击切换为纵向'))
+    await btn.props.onClick()
+    // 失败必须可见，且本地乐观更新已回滚——不留下「看着换了、刷新又变回去」的假象。
+    const after = renderWorkspaceAfterEffects(harness, props)
+    assert.ok(collectTexts(after).some((t) => t.includes('设置写入被拒绝')), '失败原因展示在错误位')
+    assert.ok(collectTexts(after).includes('⇢ 横向'), '本地方向已回滚为横向')
+  } finally {
+    harness.driver.unmount()
+  }
+})
+
 test('apply registers the header M slot and the settings section, and takes no other slot', () => {
   const registered = []
   const ctx = {

@@ -37,12 +37,18 @@
 			// settings——面板常驻不卸载，光靠 visible 变化会漏掉「开着面板改设置」。
 			const settingsStamp = react.useSyncExternalStore(settingsBus.subscribe, settingsBus.get);
 			const [theme, setTheme] = react.useState({ layoutDirection: "horizontal", lineStyle: "elbow", cardStyle: "rounded", colorTheme: "ocean", growthAnimation: true });
+			// 039 读取代际：readSettings 是异步的，在途回包可能在用户刚点完方向
+			// 按钮之后才落地，把乐观更新整份覆盖回旧值（表现为点一下闪回原方向）。
+			// 递增本计数器即作废所有在途读取；只有最新一代的回包才允许写 theme。
+			const settingsReadGenRef = react.useRef(0);
 			const [approvalState, setApprovalState] = react.useState(null);
 			react.useEffect(() => {
 				if (!visible) return;
 				if (!mindmapFace || typeof mindmapFace.readSettings !== "function") return;
+				const gen = ++settingsReadGenRef.current;
 				mindmapFace.readSettings().then((v) => {
 					if (!v) return;
+					if (gen !== settingsReadGenRef.current) return; // 已被更新的读取或本地操作作废
 					setTheme({
 						// 039 布局方向：旧设置/未知值一律回落横向（历史行为）。
 						layoutDirection: normalizeLayoutDirection(v.layoutDirection),
@@ -91,6 +97,8 @@
 			//（按钮文案短暂变「已复制 ✓」约 2s；失败复用 exportError 展示位）。
 			const [copying, setCopying] = react.useState(false);
 			const [copiedOk, setCopiedOk] = react.useState(false);
+			// 039 面板工具栏的方向切换：保存中禁用按钮；失败复用 exportError 展示位。
+			const [directionSaving, setDirectionSaving] = react.useState(false);
 			// fsTree：nodes = {path → 节点}, expanded = {path → true}, loading = {path → true}。
 			const [fsTree, setFsTree] = react.useState({ nodes: {}, expanded: {}, loading: {}, cwd: null, error: null });
 			// 会话切换时递增，使旧请求的异步回包不能写入新会话的目录树。
@@ -221,6 +229,32 @@
 					setExportError(String(error?.message ?? error));
 				} finally {
 					setExporting(false);
+				}
+			}
+
+			// 039 面板工具栏的方向切换：看脑图时一键换向，不必绕到设置页。
+			// 先乐观更新本地主题让画布立刻换向，再持久化到 host 设置；持久化
+			// 失败则回滚本地效果并把原因写进错误展示位——不静默、也不留下
+			// 「看着换了、刷新后又变回去」的假象。
+			async function onToggleDirection() {
+				if (directionSaving) return;
+				const previous = normalizeLayoutDirection(theme && theme.layoutDirection);
+				const next = previous === "vertical" ? "horizontal" : "vertical";
+				setDirectionSaving(true);
+				setExportError("");
+				// 作废在途的设置读取，否则它一落地就会覆盖下面这次乐观更新。
+				settingsReadGenRef.current++;
+				setTheme((t) => ({ ...t, layoutDirection: next }));
+				try {
+					if (!mindmapFace || typeof mindmapFace.updateSettings !== "function") throw new Error("设置服务不可用，无法保存布局方向");
+					await mindmapFace.updateSettings({ layoutDirection: next });
+					// 通知其它面（例如 Better Sidebar Tab 里的另一份工作区）重读设置。
+					settingsBus.bump();
+				} catch (error) {
+					setTheme((t) => ({ ...t, layoutDirection: previous }));
+					setExportError(String(error?.message ?? error));
+				} finally {
+					setDirectionSaving(false);
 				}
 			}
 
